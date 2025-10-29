@@ -3,8 +3,13 @@ import { useState } from "react";
 
 export const LeagueInfo = () => {
     const [loading, setLoading] = useState(false);
+    const [showInfoModal, setShowInfoModal] = useState(false);
 
     const handleExternalClick = () => {
+        setShowInfoModal(true);
+    };
+
+    const handleConfirmRegistration = () => {
         setLoading(true);
         setTimeout(() => {
             window.open(
@@ -13,6 +18,7 @@ export const LeagueInfo = () => {
                 "noopener,noreferrer"
             );
             setLoading(false);
+            setShowInfoModal(false);
         }, 700);
     };
 
@@ -156,13 +162,9 @@ export const LeagueInfo = () => {
                         <div className="flex flex-col sm:flex-row gap-4 justify-center">
                             <button
                                 onClick={handleExternalClick}
-                                disabled={loading}
-                                className={`px-6 py-3 rounded-xl font-semibold transition-all duration-300 ${loading
-                                        ? "bg-white/70 text-rose-500 cursor-wait"
-                                        : "bg-white text-rose-600 hover:bg-rose-50"
-                                    }`}
+                                className="px-6 py-3 rounded-xl font-semibold transition-all duration-300 bg-white text-rose-600 hover:bg-rose-50"
                             >
-                                {loading ? "Redirection..." : "Réserver notre place"}
+                                Réserver notre place
                             </button>
                             <button
                                 onClick={() =>
@@ -176,6 +178,99 @@ export const LeagueInfo = () => {
                     </div>
                 </motion.div>
             </div>
+
+            {/* Information Modal */}
+            {showInfoModal && (
+                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                    <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto border border-rose-100"
+                    >
+                        {/* Modal Header */}
+                        <div className="bg-linear-to-r from-rose-500 to-red-500 rounded-t-2xl p-6 text-white">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-2xl font-light mb-2">Avant de continuer...</h2>
+                                    <p className="text-rose-100/90 text-sm">
+                                        Informations importantes sur le tournoi
+                                    </p>
+                                </div>
+                                <button
+                                    onClick={() => setShowInfoModal(false)}
+                                    className="text-rose-100 hover:text-white transition-all duration-300 p-2 rounded-lg hover:bg-rose-500/30"
+                                >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Modal Content */}
+                        <div className="p-6 space-y-6">
+                            {/* Skill Level Info */}
+                            <div className="space-y-3">
+                                <h3 className="text-lg font-medium text-gray-800">
+                                    Catégorie C/C+
+                                </h3>
+                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                    <p className="text-amber-700 text-sm">
+                                        Maîtriser un 70% les techniques de volleyball, joueurs qui ont déjà joués dans de ligues récréatives.
+                                        Aucun joueur de calibre universitaire, AAA, AA, A, ne peut pas jouer dans cette catégorie.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Payment Info */}
+                            <div className="space-y-3">
+                                <h3 className="text-lg font-medium text-gray-800">
+                                    Paiement
+                                </h3>
+                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                    <p className="text-blue-700 text-sm font-semibold mb-2">
+                                        Envoyer le paiement à:
+                                    </p>
+                                    <p className="text-blue-700 text-sm">
+                                        <strong>admin@shervy.ca</strong>
+                                    </p>
+                                    <p className="text-blue-700 text-sm mt-1">
+                                        Mot de passe: <strong>SHERVY1</strong>
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Contact Info */}
+                            <div className="text-center text-sm text-gray-600 border-t border-gray-100 pt-4">
+                                Questions? <strong>contact@shervy.ca</strong>
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        {/* Modal Footer - Two Rows */}
+                        <div className="p-6 border-t border-rose-100">
+                            <div className="flex flex-col space-y-3">
+                                <button
+                                    onClick={handleConfirmRegistration}
+                                    disabled={loading}
+                                    className={`w-full py-3 rounded-lg font-medium transition-all duration-300 ${loading
+                                            ? "bg-gray-400 text-white cursor-wait"
+                                            : "bg-linear-to-r from-rose-400 to-red-400 text-white hover:from-rose-500 hover:to-red-500 hover:shadow-lg"
+                                        }`}
+                                >
+                                    {loading ? "Redirection..." : "Continuer vers l'inscription"}
+                                </button>
+                                <button
+                                    onClick={() => setShowInfoModal(false)}
+                                    className="w-full py-2.5 border border-rose-300 text-rose-700 rounded-lg hover:bg-rose-50 transition-all duration-300 font-medium"
+                                >
+                                    Annuler
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                </div>
+            )}
         </section>
     );
 };
