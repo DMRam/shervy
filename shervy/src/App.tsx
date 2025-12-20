@@ -1,7 +1,7 @@
 import { Contact } from "./components/Contact";
 import { Footer } from "./components/Footer";
 import { Hero } from "./components/Hero";
-import { LeagueInfo } from "./components/LeagueInfo";
+// import { LeagueInfo } from "./components/LeagueInfo";
 import { Navbar } from "./components/Navbar";
 import { Schedule } from "./components/Schedule";
 import { Sponsors } from "./components/Sponsors";
@@ -12,6 +12,7 @@ import './firebase/firebaseInit'
 
 
 import React, { useRef, useState, useCallback } from 'react'
+import { TournamentGallery } from "./TournamentGallery";
 
 export const App = () => {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -63,7 +64,8 @@ export const App = () => {
           videos={videos}
           videoError={videoError}
         />
-        <LeagueInfo />
+        {/* <LeagueInfo /> */}
+        <TournamentGallery />
         {/* <Teams /> */}
         <Schedule />
         <Contact />

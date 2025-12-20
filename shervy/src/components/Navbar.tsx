@@ -15,7 +15,7 @@ export const Navbar = () => {
     }, []);
 
     const handleExternalClick = () => {
-        setShowInfoModal(true);
+        // setShowInfoModal(true);
     };
 
     const handleConfirmRegistration = () => {

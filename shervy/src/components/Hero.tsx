@@ -37,9 +37,8 @@ export const Hero = ({
                     muted
                     loop
                     playsInline
-                    className={`w-full h-full object-cover transition-opacity duration-1000 ${
-                        videoLoaded ? 'opacity-60' : 'opacity-0'
-                    }`}
+                    className={`w-full h-full object-cover transition-opacity duration-1000 ${videoLoaded ? 'opacity-60' : 'opacity-0'
+                        }`}
                     onLoadedData={handleVideoLoad}
                     onError={handleVideoError}
                 >
@@ -112,9 +111,12 @@ export const Hero = ({
 
                     {/* CTA Buttons */}
                     <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-                        <button className="bg-linear-to-r from-rose-400 to-red-400 px-8 py-3 rounded-xl font-medium text-white hover:from-rose-500 hover:to-red-500 hover:shadow-lg transform hover:scale-105 transition-all duration-300 flex items-center space-x-2">
+
+                        {/* TOURNOI BUTTON */}
+
+                        {/* <button className="bg-linear-to-r from-rose-400 to-red-400 px-8 py-3 rounded-xl font-medium text-white hover:from-rose-500 hover:to-red-500 hover:shadow-lg transform hover:scale-105 transition-all duration-300 flex items-center space-x-2">
                             <span>Tournoi du 7 Décembre</span>
-                        </button>
+                        </button> */}
                         {/* <button className="border border-rose-400 px-8 py-3 rounded-xl font-medium text-rose-600 hover:bg-rose-50 hover:shadow-lg transform hover:scale-105 transition-all duration-300 flex items-center space-x-2">
                             <span>Voir le Calendrier</span>
                         </button> */}
@@ -128,11 +130,10 @@ export const Hero = ({
                     <button
                         key={index}
                         onClick={() => handleVideoSwitch(index)}
-                        className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                            index === currentVideoIndex
+                        className={`w-2 h-2 rounded-full transition-all duration-300 ${index === currentVideoIndex
                                 ? 'bg-rose-500 scale-125'
                                 : 'bg-rose-300 hover:bg-rose-400'
-                        }`}
+                            }`}
                     />
                 ))}
             </div>

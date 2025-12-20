@@ -78,7 +78,7 @@ export const Footer = () => {
                                 <div className="w-8 h-8 bg-rose-500/20 rounded-lg flex items-center justify-center">
                                     📞
                                 </div>
-                                <p className="text-rose-100">+1 (819) 555-1234</p>
+                                {/* <p className="text-rose-100">+1 (819) 555-1234</p> */}
                             </div>
                             <div className="flex items-center space-x-3">
                                 <div className="w-8 h-8 bg-rose-500/20 rounded-lg flex items-center justify-center">

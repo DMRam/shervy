@@ -247,7 +247,6 @@ export const LeagueInfo = () => {
                         </div>
 
                         {/* Modal Footer */}
-                        {/* Modal Footer - Two Rows */}
                         <div className="p-6 border-t border-rose-100">
                             <div className="flex flex-col space-y-3">
                                 <button
