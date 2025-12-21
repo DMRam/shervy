@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
 import { collection, addDoc, deleteDoc, doc, getDocs, Timestamp } from 'firebase/firestore';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { db, storage } from './firebase/firebaseInit';
 
-const ADMIN_PASSWORD = 'shervy2025';
+const ADMIN_PASSWORD = import.meta.env.VITE_FIREBASE_ADMIN_PASSWORD;
 
 interface UploadedFile {
     id: string;
@@ -27,7 +27,6 @@ const AdminUploadHelper = () => {
     const [progress, setProgress] = useState(0);
     const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
     const [loadingFiles, setLoadingFiles] = useState(true);
-    const [selectedFile, setSelectedFile] = useState<UploadedFile | null>(null);
     const [metadata, setMetadata] = useState({
         title: '',
         description: '',
