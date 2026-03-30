@@ -5,6 +5,7 @@ export const Navbar = () => {
     const [scrolled, setScrolled] = useState(false);
     const [loading, setLoading] = useState(false);
     const [showInfoModal, setShowInfoModal] = useState(false);
+    const [selectedGender, setSelectedGender] = useState<"mixed" | "female">("mixed");
 
     useEffect(() => {
         const handleScroll = () => {
@@ -15,14 +16,21 @@ export const Navbar = () => {
     }, []);
 
     const handleExternalClick = () => {
-        setShowInfoModal(true);
+        // setShowInfoModal(true);
     };
 
     const handleConfirmRegistration = () => {
         setLoading(true);
+
+        // URLs actualizadas con los enlaces correctos
+        const registrationUrls = {
+            mixed: "https://myteam.click/tournamentview/6977bbbd5261fd07c3710396",
+            female: "https://myteam.click/tournamentview/6977bbdd5261fd07c37103b6"
+        };
+
         setTimeout(() => {
             window.open(
-                "https://www.myteam.click/leaguelist/68f9515456d0a2b52b78a677/68f9515456d0a2b52b78a678",
+                registrationUrls[selectedGender],
                 "_blank",
                 "noopener,noreferrer"
             );
@@ -188,40 +196,125 @@ export const Navbar = () => {
 
                         {/* Modal Content */}
                         <div className="p-6 space-y-6">
-                            {/* Skill Level Info */}
+                            {/* Gender Selection */}
                             <div className="space-y-3">
                                 <h3 className="text-lg font-medium text-gray-800">
-                                    Catégorie C/C+
+                                    Sélectionnez le tournoi
                                 </h3>
-                                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                                    <p className="text-amber-700 text-sm">
-                                        Maîtriser un 70% les techniques de volleyball, joueurs qui ont déjà joués dans de ligues récréatives.
-                                        Aucun joueur de calibre universitaire, AAA, AA, A, ne peut pas jouer dans cette catégorie.
-                                    </p>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        onClick={() => setSelectedGender("mixed")}
+                                        className={`p-4 rounded-lg border-2 transition-all duration-300 ${selectedGender === "mixed"
+                                            ? "border-rose-500 bg-rose-50 text-rose-700"
+                                            : "border-gray-200 hover:border-rose-300 hover:bg-rose-50/50 text-gray-700"
+                                            }`}
+                                    >
+                                        <div className="font-medium mb-1">Tournoi Mixte</div>
+                                        <div className="text-xs opacity-75">Samedi 28 mars</div>
+                                        <div className="text-xs opacity-75">La Ruche - Magog</div>
+                                        <div className="text-xs mt-1 font-semibold text-rose-600">6 équipes B, 8 équipes C, 8 équipes C-</div>
+                                    </button>
+                                    <button
+                                        onClick={() => setSelectedGender("female")}
+                                        className={`p-4 rounded-lg border-2 transition-all duration-300 ${selectedGender === "female"
+                                            ? "border-rose-500 bg-rose-50 text-rose-700"
+                                            : "border-gray-200 hover:border-rose-300 hover:bg-rose-50/50 text-gray-700"
+                                            }`}
+                                    >
+                                        <div className="font-medium mb-1">Tournoi Féminin</div>
+                                        <div className="text-xs opacity-75">Dimanche 5 avril</div>
+                                        <div className="text-xs opacity-75">Seminaire de Sherbrooke</div>
+                                        <div className="text-xs mt-1 font-semibold text-rose-600">8 équipes B, 8 équipes C</div>
+                                    </button>
                                 </div>
+                            </div>
+
+                            {/* Category Definitions */}
+                            <div className="space-y-4">
+                                <h3 className="text-lg font-medium text-gray-800">
+                                    Définitions des catégories
+                                </h3>
+
+                                {/* Mixed Tournament Info */}
+                                {selectedGender === "mixed" && (
+                                    <div className="space-y-3">
+                                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                            <h4 className="font-semibold text-amber-800 mb-2">B - 6x6 Mixte B (6 places)</h4>
+                                            <p className="text-amber-700 text-sm">
+                                                Joueurs(euses) de ligues compétitives, collégial AA actifs (ves), collégial AAA ou Universitaire inactif(ves) depuis 5 ans.
+                                            </p>
+                                        </div>
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                            <h4 className="font-semibold text-blue-800 mb-2">C - 6x6 Mixte C (8 places)</h4>
+                                            <p className="text-blue-700 text-sm">
+                                                Joueurs(euses) de ligues récréatives, collégial AA inactif (ves) depuis 5 ans.
+                                            </p>
+                                        </div>
+                                        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                            <h4 className="font-semibold text-green-800 mb-2">C- - 6x6 Mixte C- (8 places)</h4>
+                                            <p className="text-green-700 text-sm">
+                                                Classe Retrouvailles pour ceux qui veulent jouer pour le plaisir comme dans le temps.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Female Tournament Info */}
+                                {selectedGender === "female" && (
+                                    <div className="space-y-3">
+                                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                                            <h4 className="font-semibold text-amber-800 mb-2">B - 6x6 Women B (8 places)</h4>
+                                            <p className="text-amber-700 text-sm">
+                                                Joueurs(euses) de ligues compétitives, collégial AA actifs (ves), collégial AAA ou Universitaire inactif(ves) depuis 5 ans.
+                                            </p>
+                                        </div>
+                                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                                            <h4 className="font-semibold text-blue-800 mb-2">C - 6x6 Women C (8 places)</h4>
+                                            <p className="text-blue-700 text-sm">
+                                                Joueurs(euses) de ligues récréatives, collégial AA inactif (ves) depuis 5 ans.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Payment Info */}
                             <div className="space-y-3">
                                 <h3 className="text-lg font-medium text-gray-800">
-                                    Paiement
+                                    Informations de paiement
                                 </h3>
-                                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                    <p className="text-blue-700 text-sm font-semibold mb-2">
+                                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
+                                    <p className="text-purple-700 text-sm font-semibold mb-2">
+                                        Frais d'inscription : <span className="text-lg">240$</span> par équipe
+                                    </p>
+                                    <p className="text-purple-700 text-sm font-semibold mb-1">
                                         Envoyer le paiement à:
                                     </p>
-                                    <p className="text-blue-700 text-sm">
-                                        <strong>admin@shervy.ca</strong>
+                                    <p className="text-purple-700 text-sm">
+                                        <strong>info@shervy.ca</strong>
                                     </p>
-                                    <p className="text-blue-700 text-sm mt-1">
-                                        Mot de passe: <strong>SHERVY1</strong>
+                                    <p className="text-purple-700 text-sm mt-2 font-semibold">
+                                        Mot de passe: <strong>shervy2</strong>
                                     </p>
+                                    <p className="text-purple-700 text-xs mt-2 opacity-75">
+                                        Note: Karla gérera les paiements directement.
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* Tournament Details */}
+                            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                                <h4 className="font-semibold text-gray-800 mb-2">Détails du tournoi</h4>
+                                <div className="text-sm text-gray-700 space-y-1">
+                                    <p><span className="font-medium">Date:</span> {selectedGender === "mixed" ? "Samedi 28 mars 2026, 8:00 AM" : "Dimanche 5 avril 2026, 8:00 AM"}</p>
+                                    <p><span className="font-medium">Lieu:</span> {selectedGender === "mixed" ? "La Ruche - Magog" : "Seminaire de Sherbrooke"}</p>
+                                    <p><span className="font-medium">Fin des inscriptions:</span> {selectedGender === "mixed" ? "21 mars 23:55" : "29 mars 23:55"}</p>
                                 </div>
                             </div>
 
                             {/* Contact Info */}
                             <div className="text-center text-sm text-gray-600 border-t border-gray-100 pt-4">
-                                Questions? <strong>contact@shervy.ca</strong>
+                                Questions? <strong>admin@shervy.ca</strong>
                             </div>
                         </div>
 
@@ -232,11 +325,11 @@ export const Navbar = () => {
                                     onClick={handleConfirmRegistration}
                                     disabled={loading}
                                     className={`w-full py-3 rounded-lg font-medium transition-all duration-300 ${loading
-                                            ? "bg-gray-400 text-white cursor-wait"
-                                            : "bg-linear-to-r from-rose-400 to-red-400 text-white hover:from-rose-500 hover:to-red-500 hover:shadow-lg"
+                                        ? "bg-gray-400 text-white cursor-wait"
+                                        : "bg-linear-to-r from-rose-400 to-red-400 text-white hover:from-rose-500 hover:to-red-500 hover:shadow-lg"
                                         }`}
                                 >
-                                    {loading ? "Redirection..." : "Continuer vers l'inscription"}
+                                    {loading ? "Redirection..." : `Continuer vers l'inscription ${selectedGender === "mixed" ? "Mixte" : "Féminin"}`}
                                 </button>
                                 <button
                                     onClick={() => setShowInfoModal(false)}

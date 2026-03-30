@@ -68,7 +68,7 @@ export const Contact = () => {
                         <ul className="space-y-3 text-gray-700">
                             <li className="flex items-center space-x-3">
                                 <span className="text-rose-500">📞</span>
-                                <span>+1 (819) 555-1234</span>
+                                {/* <span>+1 (819) 555-1234</span> */}
                             </li>
                             <li className="flex items-center space-x-3">
                                 <span className="text-rose-500">📧</span>

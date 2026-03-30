@@ -78,7 +78,7 @@ export const Footer = () => {
                                 <div className="w-8 h-8 bg-rose-500/20 rounded-lg flex items-center justify-center">
                                     📞
                                 </div>
-                                <p className="text-rose-100">+1 (819) 555-1234</p>
+                                {/* <p className="text-rose-100">+1 (819) 555-1234</p> */}
                             </div>
                             <div className="flex items-center space-x-3">
                                 <div className="w-8 h-8 bg-rose-500/20 rounded-lg flex items-center justify-center">
@@ -97,7 +97,7 @@ export const Footer = () => {
 
                 {/* Bottom Bar */}
                 <div className="border-t border-gray-700 pt-6 flex flex-col md:flex-row justify-between items-center text-xs text-rose-300/70">
-                    <p>© 2024 SherVy Volleyball — Fait avec ❤️ pour Sherbrooke.</p>
+                    <p>© 2025 SherVy Volleyball — Fait avec ❤️ pour Sherbrooke.</p>
                     <p className="mt-3 md:mt-0">Conçu par SherDev ⚡</p>
                 </div>
             </div>
