@@ -97,7 +97,7 @@ export const Footer = () => {
 
                 {/* Bottom Bar */}
                 <div className="border-t border-gray-700 pt-6 flex flex-col md:flex-row justify-between items-center text-xs text-rose-300/70">
-                    <p>© 2024 SherVy Volleyball — Fait avec ❤️ pour Sherbrooke.</p>
+                    <p>© 2025 SherVy Volleyball — Fait avec ❤️ pour Sherbrooke.</p>
                     <p className="mt-3 md:mt-0">Conçu par SherDev ⚡</p>
                 </div>
             </div>
