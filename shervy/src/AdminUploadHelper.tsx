@@ -1,10 +1,24 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { ref, uploadBytes, getDownloadURL, listAll, deleteObject } from 'firebase/storage';
-import { collection, addDoc, deleteDoc, doc, getDocs, Timestamp } from 'firebase/firestore';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+    ref,
+    uploadBytes,
+    getDownloadURL,
+    deleteObject,
+} from 'firebase/storage';
+import {
+    collection,
+    addDoc,
+    deleteDoc,
+    doc,
+    getDocs,
+    Timestamp,
+    query,
+    orderBy,
+} from 'firebase/firestore';
 import { motion } from 'framer-motion';
 import { db, storage } from './firebase/firebaseInit';
 
-const ADMIN_PASSWORD = import.meta.env.VITE_FIREBASE_ADMIN_PASSWORD;
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || 'shervy_admin_secret';
 
 interface UploadedFile {
     id: string;
@@ -12,6 +26,10 @@ interface UploadedFile {
     url: string;
     size: number;
     uploadedAt: Date;
+    tournamentId?: string;
+    tournamentName?: string;
+    isFeatured?: boolean;
+    storagePath?: string;
     metadata?: {
         title?: string;
         description?: string;
@@ -19,123 +37,235 @@ interface UploadedFile {
     };
 }
 
+interface TournamentOption {
+    id: string;
+    name: string;
+    slug?: string;
+    location?: string;
+    eventDate?: Date;
+    coverUrl?: string;
+    isPublished?: boolean;
+}
+
 const AdminUploadHelper = () => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [password, setPassword] = useState('');
+
     const [files, setFiles] = useState<File[]>([]);
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState(0);
+
     const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
     const [loadingFiles, setLoadingFiles] = useState(true);
+
+    const [tournaments, setTournaments] = useState<TournamentOption[]>([]);
+    const [loadingTournaments, setLoadingTournaments] = useState(true);
+    const [selectedPreviewTournament, setSelectedPreviewTournament] = useState<string>('all');
+
     const [metadata, setMetadata] = useState({
+        tournamentId: '',
+        tournamentName: '',
         title: '',
         description: '',
         tags: '',
+        isFeatured: false,
     });
+
+    const [newTournament, setNewTournament] = useState({
+        name: '',
+        slug: '',
+        location: '',
+        eventDate: '',
+    });
+
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Check if already authenticated
     useEffect(() => {
         const auth = localStorage.getItem('shervy_admin_auth');
         if (auth === 'true') {
             setIsAuthenticated(true);
-            loadExistingFiles();
         }
     }, []);
 
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        loadTournaments();
+        loadExistingFiles();
+    }, [isAuthenticated]);
+
     const handleLogin = (e: React.FormEvent) => {
         e.preventDefault();
+
         if (password === ADMIN_PASSWORD) {
             setIsAuthenticated(true);
             localStorage.setItem('shervy_admin_auth', 'true');
-            loadExistingFiles();
         } else {
             alert('Incorrect password');
         }
     };
 
-    // Replace this section in the loadExistingFiles function:
+    const handleLogout = () => {
+        setIsAuthenticated(false);
+        localStorage.removeItem('shervy_admin_auth');
+    };
+
+    const slugify = (value: string) =>
+        value
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, '-')
+            .replace(/(^-|-$)/g, '');
+
+    const loadTournaments = async () => {
+        try {
+            setLoadingTournaments(true);
+
+            const tournamentsQuery = query(
+                collection(db, 'tournaments'),
+                orderBy('eventDate', 'desc')
+            );
+
+            const snapshot = await getDocs(tournamentsQuery);
+
+            const items: TournamentOption[] = snapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
+                return {
+                    id: docSnap.id,
+                    name: data.name || 'Tournoi',
+                    slug: data.slug || '',
+                    location: data.location || '',
+                    eventDate: data.eventDate?.toDate?.(),
+                    coverUrl: data.coverUrl || '',
+                    isPublished: data.isPublished,
+                };
+            });
+
+            setTournaments(items);
+        } catch (error) {
+            console.error('Error loading tournaments:', error);
+            alert('Could not load tournaments');
+        } finally {
+            setLoadingTournaments(false);
+        }
+    };
 
     const loadExistingFiles = async () => {
         try {
             setLoadingFiles(true);
 
-            // Load from Storage
-            const storageRef = ref(storage, 'tournament_gallery/');
-            const result = await listAll(storageRef);
-
-            const filesData = await Promise.all(
-                result.items.map(async (item) => {
-                    const url = await getDownloadURL(item);
-
-                    // Get metadata differently - we need to store it in Firestore
-                    // or calculate it from what we know
-                    return {
-                        id: item.name,
-                        name: item.name,
-                        url,
-                        size: 0, // We don't have size from StorageReference directly
-                        uploadedAt: new Date(), // We'll get actual date from Firestore
-                    };
-                })
+            const metadataQuery = query(
+                collection(db, 'tournament_images'),
+                orderBy('uploadedAt', 'desc')
             );
 
-            // Always try to load metadata from Firestore
-            const metadataSnapshot = await getDocs(collection(db, 'tournament_images'));
-            const metadataMap = new Map();
+            const metadataSnapshot = await getDocs(metadataQuery);
 
-            metadataSnapshot.forEach(doc => {
-                const data = doc.data();
-                metadataMap.set(data.fileName, {
-                    ...data,
-                    id: data.fileName,
-                    uploadedAt: data.uploadedAt?.toDate() || new Date(),
-                });
-            });
+            const filesData: UploadedFile[] = metadataSnapshot.docs.map((docSnap) => {
+                const data = docSnap.data();
 
-            // Merge metadata with files
-            const mergedFiles = filesData.map(file => {
-                const metadata = metadataMap.get(file.id);
                 return {
-                    ...file,
-                    ...metadata, // This will override file properties with metadata
-                    size: metadata?.size || file.size,
-                    uploadedAt: metadata?.uploadedAt || file.uploadedAt,
+                    id: docSnap.id,
+                    name: data.fileName || data.originalName || 'image',
+                    url: data.url,
+                    size: data.size || 0,
+                    uploadedAt: data.uploadedAt?.toDate?.() || new Date(),
+                    tournamentId: data.tournamentId,
+                    tournamentName: data.tournamentName,
+                    isFeatured: Boolean(data.isFeatured),
+                    storagePath: data.storagePath,
+                    metadata: {
+                        title: data.title || '',
+                        description: data.description || '',
+                        tags: Array.isArray(data.tags) ? data.tags : [],
+                    },
                 };
             });
 
-            // Sort by upload date, newest first
-            mergedFiles.sort((a, b) =>
-                new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
-            );
-
-            setUploadedFiles(mergedFiles);
+            setUploadedFiles(filesData);
         } catch (error) {
             console.error('Error loading files:', error);
-
-            // If Firestore fails, show at least the images we can get from Storage
-            if (uploadedFiles.length === 0) {
-                alert('Could not load metadata, but showing available images');
-            }
+            alert('Could not load uploaded images');
         } finally {
             setLoadingFiles(false);
+        }
+    };
+
+    const createTournament = async () => {
+        if (!newTournament.name.trim()) {
+            alert('Tournament name is required');
+            return;
+        }
+
+        try {
+            const slug = newTournament.slug.trim()
+                ? slugify(newTournament.slug)
+                : slugify(newTournament.name);
+
+            const docRef = await addDoc(collection(db, 'tournaments'), {
+                name: newTournament.name.trim(),
+                slug,
+                location: newTournament.location.trim(),
+                eventDate: newTournament.eventDate
+                    ? Timestamp.fromDate(new Date(newTournament.eventDate))
+                    : null,
+                coverUrl: '',
+                isPublished: true,
+                createdAt: Timestamp.now(),
+            });
+
+            const createdTournament: TournamentOption = {
+                id: docRef.id,
+                name: newTournament.name.trim(),
+                slug,
+                location: newTournament.location.trim(),
+                eventDate: newTournament.eventDate ? new Date(newTournament.eventDate) : undefined,
+                isPublished: true,
+            };
+
+            setTournaments((prev) => {
+                const next = [createdTournament, ...prev];
+                return next.sort((a, b) => {
+                    const aTime = a.eventDate?.getTime() || 0;
+                    const bTime = b.eventDate?.getTime() || 0;
+                    return bTime - aTime;
+                });
+            });
+
+            setMetadata((prev) => ({
+                ...prev,
+                tournamentId: createdTournament.id,
+                tournamentName: createdTournament.name,
+            }));
+
+            setNewTournament({
+                name: '',
+                slug: '',
+                location: '',
+                eventDate: '',
+            });
+
+            alert('Tournament created successfully');
+        } catch (error) {
+            console.error('Error creating tournament:', error);
+            alert('Failed to create tournament');
         }
     };
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const selected = Array.from(e.target.files || []);
 
-        // Filter only image files
-        const imageFiles = selected.filter(file =>
-            file.type.startsWith('image/') &&
-            ['image/jpeg', 'image/png', 'image/webp', '/image/gif'].includes(file.type)
+        const imageFiles = selected.filter(
+            (file) =>
+                file.type.startsWith('image/') &&
+                ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)
         );
 
-        setFiles(prev => [...prev, ...imageFiles]);
+        setFiles((prev) => [...prev, ...imageFiles]);
     };
 
     const removeFile = (index: number) => {
-        setFiles(prev => prev.filter((_, i) => i !== index));
+        setFiles((prev) => prev.filter((_, i) => i !== index));
     };
 
     const handleUpload = async () => {
@@ -144,39 +274,48 @@ const AdminUploadHelper = () => {
             return;
         }
 
+        if (!metadata.tournamentId || !metadata.tournamentName) {
+            alert('Please select a tournament first');
+            return;
+        }
+
         setUploading(true);
         setProgress(0);
 
-        const uploadedUrls: UploadedFile[] = [];
+        const newlyUploaded: UploadedFile[] = [];
 
-        for (let i = 0; i < files.length; i++) {
+        for (let i = 0; i < files.length; i += 1) {
             const file = files[i];
 
             try {
-                // Create unique filename with timestamp
                 const timestamp = Date.now();
                 const sanitizedName = file.name.replace(/[^a-zA-Z0-9.]/g, '_');
                 const fileName = `${timestamp}_${sanitizedName}`;
+                const storagePath = `tournament_gallery/${metadata.tournamentId}/${fileName}`;
 
-                const storageRef = ref(storage, `tournament_gallery/${fileName}`);
-
-                // Upload to Firebase Storage
+                const storageRef = ref(storage, storagePath);
                 const snapshot = await uploadBytes(storageRef, file);
                 const url = await getDownloadURL(snapshot.ref);
 
-                // Prepare metadata
                 const fileMetadata = {
-                    title: metadata.title || file.name.replace(/\.[^/.]+$/, "").replace(/_/g, ' '),
+                    tournamentId: metadata.tournamentId,
+                    tournamentName: metadata.tournamentName,
+                    title: metadata.title || file.name.replace(/\.[^/.]+$/, '').replace(/_/g, ' '),
                     description: metadata.description || '',
                     tags: metadata.tags
-                        ? metadata.tags.split(',').map(tag => tag.trim().toLowerCase()).filter(tag => tag)
+                        ? metadata.tags
+                            .split(',')
+                            .map((tag) => tag.trim().toLowerCase())
+                            .filter(Boolean)
                         : [],
+                    isFeatured: metadata.isFeatured,
                 };
 
-                // Save to Firestore for metadata
-                await addDoc(collection(db, 'tournament_images'), {
+                const docRef = await addDoc(collection(db, 'tournament_images'), {
                     ...fileMetadata,
                     url,
+                    thumbnailUrl: url,
+                    storagePath,
                     fileName,
                     originalName: file.name,
                     size: file.size,
@@ -184,56 +323,72 @@ const AdminUploadHelper = () => {
                     uploadedAt: Timestamp.now(),
                 });
 
-                uploadedUrls.push({
-                    id: fileName,
+                newlyUploaded.push({
+                    id: docRef.id,
                     name: fileName,
                     url,
                     size: file.size,
                     uploadedAt: new Date(),
-                    metadata: fileMetadata,
+                    tournamentId: metadata.tournamentId,
+                    tournamentName: metadata.tournamentName,
+                    isFeatured: metadata.isFeatured,
+                    storagePath,
+                    metadata: {
+                        title: fileMetadata.title,
+                        description: fileMetadata.description,
+                        tags: fileMetadata.tags,
+                    },
                 });
 
-                // Update progress
                 setProgress(Math.round(((i + 1) / files.length) * 100));
-
             } catch (error) {
                 console.error('Error uploading file:', error);
-                alert(`Failed to upload ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                alert(
+                    `Failed to upload ${file.name}: ${error instanceof Error ? error.message : 'Unknown error'
+                    }`
+                );
             }
         }
 
-        // Add uploaded files to the list
-        setUploadedFiles(prev => [...uploadedUrls, ...prev]);
+        setUploadedFiles((prev) =>
+            [...newlyUploaded, ...prev].sort(
+                (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
+            )
+        );
 
-        // Reset form
         setFiles([]);
-        setMetadata({ title: '', description: '', tags: '' });
+        setMetadata((prev) => ({
+            ...prev,
+            title: '',
+            description: '',
+            tags: '',
+            isFeatured: false,
+        }));
+
         if (fileInputRef.current) fileInputRef.current.value = '';
 
         setUploading(false);
         setProgress(0);
-        alert(`Successfully uploaded ${uploadedUrls.length} file(s)`);
+
+        alert(`Successfully uploaded ${newlyUploaded.length} file(s)`);
     };
 
-    const handleDelete = async (fileId: string) => {
+    const handleDelete = async (file: UploadedFile) => {
         if (!confirm('Are you sure you want to delete this image?')) return;
 
         try {
-            // Delete from Storage
-            const storageRef = ref(storage, `tournament_gallery/${fileId}`);
-            await deleteObject(storageRef);
+            if (file.storagePath) {
+                const storageRef = ref(storage, file.storagePath);
+                await deleteObject(storageRef);
+            } else if (file.tournamentId && file.name) {
+                const fallbackPath = `tournament_gallery/${file.tournamentId}/${file.name}`;
+                const storageRef = ref(storage, fallbackPath);
+                await deleteObject(storageRef);
+            }
 
-            // Try to delete from Firestore
-            const metadataSnapshot = await getDocs(collection(db, 'tournament_images'));
-            metadataSnapshot.forEach(async (docSnapshot) => {
-                const data = docSnapshot.data();
-                if (data.fileName === fileId) {
-                    await deleteDoc(doc(db, 'tournament_images', docSnapshot.id));
-                }
-            });
+            await deleteDoc(doc(db, 'tournament_images', file.id));
 
-            // Update local state
-            setUploadedFiles(prev => prev.filter(file => file.id !== fileId));
+            setUploadedFiles((prev) => prev.filter((item) => item.id !== file.id));
             alert('File deleted successfully');
         } catch (error) {
             console.error('Error deleting file:', error);
@@ -241,10 +396,15 @@ const AdminUploadHelper = () => {
         }
     };
 
-    const handleLogout = () => {
-        setIsAuthenticated(false);
-        localStorage.removeItem('shervy_admin_auth');
-    };
+    const filteredUploadedFiles = useMemo(() => {
+        if (selectedPreviewTournament === 'all') return uploadedFiles;
+        return uploadedFiles.filter((file) => file.tournamentId === selectedPreviewTournament);
+    }, [uploadedFiles, selectedPreviewTournament]);
+
+    const totalSizeMb = useMemo(
+        () => uploadedFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024,
+        [uploadedFiles]
+    );
 
     if (!isAuthenticated) {
         return (
@@ -261,16 +421,14 @@ const AdminUploadHelper = () => {
                     </div>
 
                     <form onSubmit={handleLogin} className="space-y-4">
-                        <div>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                placeholder="Enter admin password"
-                                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
-                                required
-                            />
-                        </div>
+                        <input
+                            type="password"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            placeholder="Enter admin password"
+                            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                            required
+                        />
                         <button
                             type="submit"
                             className="w-full bg-gradient-to-r from-rose-500 to-orange-500 text-white py-3 rounded-lg font-medium hover:opacity-90 transition-opacity"
@@ -290,7 +448,6 @@ const AdminUploadHelper = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-4 md:p-8">
             <div className="max-w-7xl mx-auto">
-                {/* Header */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div>
                         <h1 className="text-3xl font-bold text-gray-900">Tournament Gallery Upload Helper</h1>
@@ -305,16 +462,104 @@ const AdminUploadHelper = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Left Column - Upload Form */}
                     <div className="lg:col-span-2 space-y-8">
-                        {/* Upload Section */}
+                        <div className="bg-white rounded-2xl shadow-lg p-6">
+                            <h2 className="text-xl font-semibold text-gray-900 mb-6">Tournament Setup</h2>
+
+                            <div className="grid md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Select existing tournament
+                                    </label>
+                                    <select
+                                        value={metadata.tournamentId}
+                                        onChange={(e) => {
+                                            const selected = tournaments.find((t) => t.id === e.target.value);
+                                            setMetadata((prev) => ({
+                                                ...prev,
+                                                tournamentId: e.target.value,
+                                                tournamentName: selected?.name || '',
+                                            }));
+                                        }}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                    >
+                                        <option value="">Select tournament</option>
+                                        {tournaments.map((tournament) => (
+                                            <option key={tournament.id} value={tournament.id}>
+                                                {tournament.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="flex items-end">
+                                    <div className="w-full rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                                        {loadingTournaments
+                                            ? 'Loading tournaments...'
+                                            : `${tournaments.length} tournament(s) available`}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="mt-6 border-t pt-6">
+                                <h3 className="text-lg font-medium text-gray-900 mb-4">Create new tournament</h3>
+
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <input
+                                        type="text"
+                                        value={newTournament.name}
+                                        onChange={(e) =>
+                                            setNewTournament((prev) => ({ ...prev, name: e.target.value }))
+                                        }
+                                        placeholder="Tournament name"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                    />
+
+                                    <input
+                                        type="text"
+                                        value={newTournament.slug}
+                                        onChange={(e) =>
+                                            setNewTournament((prev) => ({ ...prev, slug: e.target.value }))
+                                        }
+                                        placeholder="Slug (optional)"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                    />
+
+                                    <input
+                                        type="text"
+                                        value={newTournament.location}
+                                        onChange={(e) =>
+                                            setNewTournament((prev) => ({ ...prev, location: e.target.value }))
+                                        }
+                                        placeholder="Location"
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                    />
+
+                                    <input
+                                        type="date"
+                                        value={newTournament.eventDate}
+                                        onChange={(e) =>
+                                            setNewTournament((prev) => ({ ...prev, eventDate: e.target.value }))
+                                        }
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                    />
+                                </div>
+
+                                <button
+                                    onClick={createTournament}
+                                    className="mt-4 px-5 py-2.5 rounded-lg bg-gray-900 text-white hover:bg-black transition-colors"
+                                >
+                                    Create Tournament
+                                </button>
+                            </div>
+                        </div>
+
                         <div className="bg-white rounded-2xl shadow-lg p-6">
                             <div className="flex items-center justify-between mb-6">
                                 <h2 className="text-xl font-semibold text-gray-900">Upload New Images</h2>
                                 <span className="text-sm text-gray-500">Max 10MB per image</span>
                             </div>
 
-                            {/* File Drop Zone */}
                             <div
                                 className={`border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all ${files.length > 0
                                         ? 'border-rose-400 bg-rose-50'
@@ -343,7 +588,6 @@ const AdminUploadHelper = () => {
                                 <p className="text-sm text-gray-500">PNG, JPG, WebP, GIF up to 10MB</p>
                             </div>
 
-                            {/* Selected Files */}
                             {files.length > 0 && (
                                 <div className="mt-6">
                                     <h3 className="text-lg font-medium text-gray-900 mb-3">
@@ -352,7 +596,7 @@ const AdminUploadHelper = () => {
                                     <div className="space-y-3">
                                         {files.map((file, index) => (
                                             <div
-                                                key={index}
+                                                key={`${file.name}-${index}`}
                                                 className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                                             >
                                                 <div className="flex items-center gap-3">
@@ -382,21 +626,39 @@ const AdminUploadHelper = () => {
                                 </div>
                             )}
 
-                            {/* Metadata Inputs */}
                             <div className="mt-6 space-y-4">
-                                <h3 className="text-lg font-medium text-gray-900">Image Metadata (Optional)</h3>
+                                <h3 className="text-lg font-medium text-gray-900">Image Metadata</h3>
 
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Title
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={metadata.title}
-                                        onChange={(e) => setMetadata(prev => ({ ...prev, title: e.target.value }))}
-                                        placeholder="e.g., Championship Celebration"
-                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
-                                    />
+                                <div className="grid md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                                            Title
+                                        </label>
+                                        <input
+                                            type="text"
+                                            value={metadata.title}
+                                            onChange={(e) =>
+                                                setMetadata((prev) => ({ ...prev, title: e.target.value }))
+                                            }
+                                            placeholder="e.g., Championship Celebration"
+                                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                        />
+                                    </div>
+
+                                    <div className="flex items-center gap-3 pt-7">
+                                        <input
+                                            id="isFeatured"
+                                            type="checkbox"
+                                            checked={metadata.isFeatured}
+                                            onChange={(e) =>
+                                                setMetadata((prev) => ({ ...prev, isFeatured: e.target.checked }))
+                                            }
+                                            className="h-4 w-4 rounded border-gray-300 text-rose-600 focus:ring-rose-500"
+                                        />
+                                        <label htmlFor="isFeatured" className="text-sm font-medium text-gray-700">
+                                            Mark as featured on homepage
+                                        </label>
+                                    </div>
                                 </div>
 
                                 <div>
@@ -405,7 +667,9 @@ const AdminUploadHelper = () => {
                                     </label>
                                     <textarea
                                         value={metadata.description}
-                                        onChange={(e) => setMetadata(prev => ({ ...prev, description: e.target.value }))}
+                                        onChange={(e) =>
+                                            setMetadata((prev) => ({ ...prev, description: e.target.value }))
+                                        }
                                         placeholder="Brief description of the image"
                                         rows={3}
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
@@ -419,18 +683,19 @@ const AdminUploadHelper = () => {
                                     <input
                                         type="text"
                                         value={metadata.tags}
-                                        onChange={(e) => setMetadata(prev => ({ ...prev, tags: e.target.value }))}
+                                        onChange={(e) =>
+                                            setMetadata((prev) => ({ ...prev, tags: e.target.value }))
+                                        }
                                         placeholder="e.g., winner, celebration, team-a"
                                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
                                     />
                                 </div>
                             </div>
 
-                            {/* Upload Button */}
                             <div className="mt-8">
                                 <button
                                     onClick={handleUpload}
-                                    disabled={uploading || files.length === 0}
+                                    disabled={uploading || files.length === 0 || !metadata.tournamentId}
                                     className="w-full bg-gradient-to-r from-rose-500 to-orange-500 text-white py-4 rounded-lg font-medium hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                                 >
                                     {uploading ? (
@@ -458,24 +723,47 @@ const AdminUploadHelper = () => {
                             </div>
                         </div>
 
-                        {/* Gallery Preview */}
                         <div className="bg-white rounded-2xl shadow-lg p-6">
-                            <h2 className="text-xl font-semibold text-gray-900 mb-6">
-                                Gallery Preview ({uploadedFiles.length} images)
-                            </h2>
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+                                <h2 className="text-xl font-semibold text-gray-900">
+                                    Gallery Preview ({filteredUploadedFiles.length} images)
+                                </h2>
+
+                                <div className="flex gap-3">
+                                    <select
+                                        value={selectedPreviewTournament}
+                                        onChange={(e) => setSelectedPreviewTournament(e.target.value)}
+                                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                                    >
+                                        <option value="all">All tournaments</option>
+                                        {tournaments.map((tournament) => (
+                                            <option key={tournament.id} value={tournament.id}>
+                                                {tournament.name}
+                                            </option>
+                                        ))}
+                                    </select>
+
+                                    <button
+                                        onClick={loadExistingFiles}
+                                        className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
+                                    >
+                                        Refresh
+                                    </button>
+                                </div>
+                            </div>
 
                             {loadingFiles ? (
                                 <div className="flex justify-center py-12">
                                     <div className="w-8 h-8 border-2 border-rose-500 border-t-transparent rounded-full animate-spin"></div>
                                 </div>
-                            ) : uploadedFiles.length === 0 ? (
+                            ) : filteredUploadedFiles.length === 0 ? (
                                 <div className="text-center py-12 text-gray-500">
                                     <p>No images uploaded yet</p>
                                     <p className="text-sm mt-1">Upload some images to see them here</p>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                                    {uploadedFiles.map((file) => (
+                                    {filteredUploadedFiles.map((file) => (
                                         <div
                                             key={file.id}
                                             className="group relative aspect-square rounded-lg overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200"
@@ -486,19 +774,29 @@ const AdminUploadHelper = () => {
                                                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                                             />
 
-                                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
                                                 <div className="absolute bottom-0 left-0 right-0 p-3">
                                                     <p className="text-white text-sm font-medium truncate">
                                                         {file.metadata?.title || file.name}
                                                     </p>
+                                                    <p className="text-[11px] text-gray-200 truncate">
+                                                        {file.tournamentName || 'No tournament'}
+                                                    </p>
                                                     <div className="flex justify-between items-center mt-2">
-                                                        <span className="text-xs text-gray-300">
-                                                            {new Date(file.uploadedAt).toLocaleDateString()}
-                                                        </span>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs text-gray-300">
+                                                                {new Date(file.uploadedAt).toLocaleDateString()}
+                                                            </span>
+                                                            {file.isFeatured && (
+                                                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500 text-white">
+                                                                    Featured
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <button
                                                             onClick={(e) => {
                                                                 e.stopPropagation();
-                                                                handleDelete(file.id);
+                                                                handleDelete(file);
                                                             }}
                                                             className="p-1.5 bg-red-500 text-white rounded hover:bg-red-600"
                                                         >
@@ -516,9 +814,7 @@ const AdminUploadHelper = () => {
                         </div>
                     </div>
 
-                    {/* Right Column - Stats & Instructions */}
                     <div className="space-y-8">
-                        {/* Stats Card */}
                         <div className="bg-white rounded-2xl shadow-lg p-6">
                             <h2 className="text-xl font-semibold text-gray-900 mb-6">Upload Stats</h2>
 
@@ -530,8 +826,18 @@ const AdminUploadHelper = () => {
 
                                 <div className="flex justify-between items-center pb-3 border-b">
                                     <span className="text-gray-600">Total Size</span>
+                                    <span className="font-semibold text-gray-900">{totalSizeMb.toFixed(2)} MB</span>
+                                </div>
+
+                                <div className="flex justify-between items-center pb-3 border-b">
+                                    <span className="text-gray-600">Total Tournaments</span>
+                                    <span className="font-semibold text-gray-900">{tournaments.length}</span>
+                                </div>
+
+                                <div className="flex justify-between items-center pb-3 border-b">
+                                    <span className="text-gray-600">Featured Images</span>
                                     <span className="font-semibold text-gray-900">
-                                        {(uploadedFiles.reduce((acc, file) => acc + file.size, 0) / 1024 / 1024).toFixed(2)} MB
+                                        {uploadedFiles.filter((file) => file.isFeatured).length}
                                     </span>
                                 </div>
 
@@ -544,87 +850,36 @@ const AdminUploadHelper = () => {
                                     </span>
                                 </div>
                             </div>
-
-                            <div className="mt-8 p-4 bg-gradient-to-r from-rose-50 to-orange-50 rounded-lg">
-                                <h3 className="font-semibold text-gray-900 mb-2">Quick Actions</h3>
-                                <button
-                                    onClick={loadExistingFiles}
-                                    className="w-full px-4 py-2 bg-white text-gray-700 rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors"
-                                >
-                                    Refresh Gallery
-                                </button>
-                            </div>
                         </div>
 
-                        {/* Instructions Card */}
                         <div className="bg-white rounded-2xl shadow-lg p-6">
-                            <h2 className="text-xl font-semibold text-gray-900 mb-4">Instructions</h2>
+                            <h2 className="text-xl font-semibold text-gray-900 mb-4">Recommended Structure</h2>
 
-                            <div className="space-y-4">
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center">
-                                        1
-                                    </div>
-                                    <div>
-                                        <h4 className="font-medium text-gray-900">Select Images</h4>
-                                        <p className="text-sm text-gray-600">Choose tournament photos from your computer</p>
-                                    </div>
+                            <div className="space-y-4 text-sm text-gray-600">
+                                <div className="p-4 rounded-lg bg-gray-50 border">
+                                    <p className="font-medium text-gray-900 mb-1">Collection</p>
+                                    <code>tournaments</code>
                                 </div>
-
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center">
-                                        2
-                                    </div>
-                                    <div>
-                                        <h4 className="font-medium text-gray-900">Add Metadata (Optional)</h4>
-                                        <p className="text-sm text-gray-600">Add titles, descriptions, and tags for better organization</p>
-                                    </div>
+                                <div className="p-4 rounded-lg bg-gray-50 border">
+                                    <p className="font-medium text-gray-900 mb-1">Collection</p>
+                                    <code>tournament_images</code>
                                 </div>
-
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center">
-                                        3
-                                    </div>
-                                    <div>
-                                        <h4 className="font-medium text-gray-900">Upload</h4>
-                                        <p className="text-sm text-gray-600">Click upload to add images to the tournament gallery</p>
-                                    </div>
+                                <div className="p-4 rounded-lg bg-gray-50 border">
+                                    <p className="font-medium text-gray-900 mb-1">Storage path</p>
+                                    <code>tournament_gallery/[tournamentId]/[fileName]</code>
                                 </div>
-
-                                <div className="flex items-start gap-3">
-                                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center">
-                                        4
-                                    </div>
-                                    <div>
-                                        <h4 className="font-medium text-gray-900">Verify</h4>
-                                        <p className="text-sm text-gray-600">Check the gallery preview to ensure everything looks good</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="mt-6 pt-6 border-t border-gray-200">
-                                <h4 className="font-medium text-gray-900 mb-2">Best Practices</h4>
-                                <ul className="text-sm text-gray-600 space-y-1 list-disc pl-4">
-                                    <li>Use descriptive titles for better SEO</li>
-                                    <li>Add relevant tags for filtering</li>
-                                    <li>Optimal image size: 1200x800px</li>
-                                    <li>Use JPG for photos, PNG for graphics</li>
-                                </ul>
                             </div>
                         </div>
 
-                        {/* Storage Info */}
                         <div className="bg-gradient-to-r from-rose-500 to-orange-500 rounded-2xl shadow-lg p-6 text-white">
-                            <h2 className="text-xl font-semibold mb-2">Storage Location</h2>
-                            <p className="text-rose-100 mb-4">
-                                Images are uploaded to Firebase Storage under:
-                            </p>
-                            <code className="block bg-black/20 p-3 rounded-lg text-sm font-mono break-all">
-                                /tournament_gallery/
-                            </code>
-                            <p className="text-sm text-rose-100 mt-4">
-                                Metadata is saved in Firestore collection: <strong>tournament_images</strong>
-                            </p>
+                            <h2 className="text-xl font-semibold mb-2">How to use this</h2>
+                            <ul className="space-y-2 text-sm text-rose-100 list-disc pl-5">
+                                <li>Create the tournament first</li>
+                                <li>Select the tournament before uploading</li>
+                                <li>Use featured only for homepage highlights</li>
+                                <li>Use tags for filtering and grouping</li>
+                                <li>Keep only a few featured images per event</li>
+                            </ul>
                         </div>
                     </div>
                 </div>

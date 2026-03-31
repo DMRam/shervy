@@ -1,131 +1,202 @@
 import { useState, useEffect, useCallback } from 'react';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
-import { ref, getDownloadURL, listAll } from 'firebase/storage';
+import {
+  collection,
+  getDocs,
+  query,
+  orderBy,
+  where,
+  limit,
+  startAfter,
+  QueryDocumentSnapshot,
+  type DocumentData,
+} from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db, storage } from './firebase/firebaseInit';
+import { db } from './firebase/firebaseInit';
+
+interface Tournament {
+  id: string;
+  name: string;
+  date?: Date;
+  coverUrl?: string;
+  isActive?: boolean;
+}
 
 interface GalleryImage {
   id: string;
   url: string;
+  thumbnailUrl?: string;
   title: string;
   description?: string;
   date?: Date;
   tags?: string[];
+  tournamentId: string;
+  tournamentName?: string;
+  isFeatured?: boolean;
 }
 
-export const TournamentGallery = () => {
+interface TournamentGalleryProps {
+  featuredOnly?: boolean;
+  initialLimit?: number;
+}
+
+const PAGE_SIZE_DEFAULT = 12;
+
+export const TournamentGallery = ({
+  featuredOnly = false,
+  initialLimit = PAGE_SIZE_DEFAULT,
+}: TournamentGalleryProps) => {
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [selectedTournamentId, setSelectedTournamentId] = useState<string>('all');
   const [images, setImages] = useState<GalleryImage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedImage, setSelectedImage] = useState<GalleryImage | null>(null);
-  const [filter, setFilter] = useState<string>('tous');
   const [viewMode, setViewMode] = useState<'grid' | 'masonry'>('grid');
   const [sortBy, setSortBy] = useState<'recent' | 'ancien'>('recent');
+  const [filterTag, setFilterTag] = useState<string>('tous');
+  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
+  const [hasMore, setHasMore] = useState(true);
 
-  // Fetch images from Firebase
   useEffect(() => {
-    const fetchImages = async () => {
+    const fetchTournaments = async () => {
       try {
-        setLoading(true);
+        const tournamentsRef = collection(db, 'tournaments');
+        const tournamentsQuery = query(tournamentsRef, orderBy('eventDate', 'desc'));
+        const snapshot = await getDocs(tournamentsQuery);
 
-        // Try to fetch from Firestore first
-        const imagesCollection = collection(db, 'tournament_images');
-        const imagesQuery = query(imagesCollection, orderBy('uploadedAt', 'desc'));
-        const querySnapshot = await getDocs(imagesQuery);
-
-        const fetchedImages: GalleryImage[] = [];
-
-        querySnapshot.forEach((doc) => {
+        const items: Tournament[] = snapshot.docs.map((doc) => {
           const data = doc.data();
-          fetchedImages.push({
+          return {
             id: doc.id,
-            url: data.url,
-            title: data.title || data.originalName?.replace(/\.[^/.]+$/, "").replace(/[_-]/g, ' ') || 'Sans titre',
-            description: data.description,
-            date: data.uploadedAt?.toDate(),
-            tags: data.tags
-          } as GalleryImage);
+            name: data.name || 'Tournoi',
+            date: data.eventDate?.toDate?.() || data.date?.toDate?.(),
+            coverUrl: data.coverUrl,
+            isActive: data.isActive,
+          };
         });
 
-        // If no images in Firestore, try Storage
-        if (fetchedImages.length === 0) {
-          console.log('No images in Firestore, checking Storage...');
-          const storageRef = ref(storage, 'tournament_gallery/');
-          const result = await listAll(storageRef);
+        setTournaments(items);
 
-          const urls = await Promise.all(
-            result.items.map(async (item) => {
-              const url = await getDownloadURL(item);
-              return {
-                id: item.name,
-                url,
-                title: item.name.replace(/\.[^/.]+$/, "").replace(/[_-]/g, ' '),
-                description: 'Photo du tournoi',
-                date: new Date(),
-                tags: ['tournoi']
-              };
-            })
-          );
-          setImages(urls);
+        if (items.length > 0) {
+          setSelectedTournamentId(items[0].id);
         } else {
-          setImages(fetchedImages);
+          setSelectedTournamentId('all');
         }
-        setError(null);
       } catch (err) {
-        console.error('Erreur lors du chargement des images :', err);
-        setError('Impossible de charger les images de la galerie.');
-        setImages(getSampleImages());
-      } finally {
-        setLoading(false);
+        console.error('Erreur lors du chargement des tournois:', err);
+        setError('Impossible de charger les tournois.');
       }
     };
-    fetchImages();
+
+    fetchTournaments();
   }, []);
 
-  const getSampleImages = (): GalleryImage[] => {
-    return [
-      {
-        id: '1',
-        url: 'https://images.unsplash.com/photo-1575361204480-aadea25e6e68?w=800&auto=format&fit=crop',
-        title: 'Moment du championnat',
-        description: 'L\'équipe gagnante célèbre sa victoire',
-        date: new Date('2024-03-15'),
-        tags: ['vainqueur', 'célébration']
-      },
-      {
-        id: '2',
-        url: 'https://images.unsplash.com/photo-1546519638-68e109498ffc?w=800&auto=format&fit=crop',
-        title: 'Match final',
-        description: 'Les moments intenses de la finale du tournoi',
-        date: new Date('2024-03-15'),
-        tags: ['finale', 'match']
-      },
-      {
-        id: '3',
-        url: 'https://images.unsplash.com/photo-1522778119026-d647f0596c20?w-800&auto=format&fit=crop',
-        title: 'Esprit d\'équipe',
-        description: 'Les équipes démontrent un grand esprit sportif',
-        date: new Date('2024-03-14'),
-        tags: ['équipe', 'esprit']
-      }
-    ];
+  const buildImagesQuery = (
+    tournamentId: string,
+    pageLimit: number,
+    cursor?: QueryDocumentSnapshot<DocumentData> | null
+  ) => {
+    const imagesRef = collection(db, 'tournament_images');
+    const constraints: any[] = [];
+
+    if (tournamentId !== 'all') {
+      constraints.push(where('tournamentId', '==', tournamentId));
+    }
+
+    if (featuredOnly) {
+      constraints.push(where('isFeatured', '==', true));
+    }
+
+    constraints.push(orderBy('uploadedAt', 'desc'));
+    constraints.push(limit(pageLimit));
+
+    if (cursor) {
+      constraints.push(startAfter(cursor));
+    }
+
+    return query(imagesRef, ...constraints);
   };
 
+  const fetchImages = useCallback(
+    async (
+      tournamentId: string,
+      append = false,
+      cursor?: QueryDocumentSnapshot<DocumentData> | null
+    ) => {
+      try {
+        if (append) {
+          setLoadingMore(true);
+        } else {
+          setLoading(true);
+          setLastVisible(null);
+          setHasMore(true);
+          setFilterTag('tous');
+        }
+
+        const imagesQuery = buildImagesQuery(
+          tournamentId,
+          initialLimit,
+          append ? (cursor ?? null) : null
+        );
+
+        const snapshot = await getDocs(imagesQuery);
+
+        const fetchedImages: GalleryImage[] = snapshot.docs.map((doc) => {
+          const data = doc.data();
+
+          return {
+            id: doc.id,
+            url: data.url,
+            thumbnailUrl: data.thumbnailUrl,
+            title:
+              data.title ||
+              data.originalName?.replace(/\.[^/.]+$/, '').replace(/[_-]/g, ' ') ||
+              'Sans titre',
+            description: data.description,
+            date: data.uploadedAt?.toDate?.(),
+            tags: data.tags || [],
+            tournamentId: data.tournamentId || '',
+            tournamentName: data.tournamentName,
+            isFeatured: Boolean(data.isFeatured),
+          };
+        });
+
+        setImages((prev) => (append ? [...prev, ...fetchedImages] : fetchedImages));
+        setLastVisible(snapshot.docs.length ? snapshot.docs[snapshot.docs.length - 1] : null);
+        setHasMore(snapshot.docs.length === initialLimit);
+        setError(null);
+      } catch (err) {
+        console.error('Erreur lors du chargement des images:', err);
+        setError('Impossible de charger les images de la galerie.');
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    [featuredOnly, initialLimit]
+  );
+
+  useEffect(() => {
+    if (!selectedTournamentId) return;
+    fetchImages(selectedTournamentId, false, null);
+  }, [selectedTournamentId, fetchImages]);
+
   const getUniqueTags = () => {
-    const allTags = images.flatMap(img => img.tags || []);
+    const allTags = images.flatMap((img) => img.tags || []);
     return ['tous', ...Array.from(new Set(allTags))];
   };
 
-  const filteredImages = filter === 'tous'
-    ? images
-    : images.filter(img => img.tags?.includes(filter));
+  const filteredImages =
+    filterTag === 'tous'
+      ? images
+      : images.filter((img) => img.tags?.includes(filterTag));
 
   const sortedImages = [...filteredImages].sort((a, b) => {
     if (sortBy === 'recent') {
       return (b.date?.getTime() || 0) - (a.date?.getTime() || 0);
-    } else {
-      return (a.date?.getTime() || 0) - (b.date?.getTime() || 0);
     }
+    return (a.date?.getTime() || 0) - (b.date?.getTime() || 0);
   });
 
   const openLightbox = (image: GalleryImage) => {
@@ -139,56 +210,54 @@ export const TournamentGallery = () => {
   };
 
   const goToPrevious = useCallback(() => {
-    if (!selectedImage) return;
-    const currentIndex = sortedImages.findIndex(img => img.id === selectedImage.id);
+    if (!selectedImage || sortedImages.length === 0) return;
+    const currentIndex = sortedImages.findIndex((img) => img.id === selectedImage.id);
     const previousIndex = currentIndex > 0 ? currentIndex - 1 : sortedImages.length - 1;
     setSelectedImage(sortedImages[previousIndex]);
   }, [selectedImage, sortedImages]);
 
   const goToNext = useCallback(() => {
-    if (!selectedImage) return;
-    const currentIndex = sortedImages.findIndex(img => img.id === selectedImage.id);
+    if (!selectedImage || sortedImages.length === 0) return;
+    const currentIndex = sortedImages.findIndex((img) => img.id === selectedImage.id);
     const nextIndex = currentIndex < sortedImages.length - 1 ? currentIndex + 1 : 0;
     setSelectedImage(sortedImages[nextIndex]);
   }, [selectedImage, sortedImages]);
 
-  // Keyboard navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!selectedImage) return;
 
-      switch (e.key) {
-        case 'Escape':
-          closeLightbox();
-          break;
-        case 'ArrowLeft':
-          goToPrevious();
-          break;
-        case 'ArrowRight':
-          goToNext();
-          break;
-      }
+      if (e.key === 'Escape') closeLightbox();
+      if (e.key === 'ArrowLeft') goToPrevious();
+      if (e.key === 'ArrowRight') goToNext();
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedImage, goToPrevious, goToNext]);
 
-  // Format date nicely
   const formatDate = (date?: Date) => {
     if (!date) return 'Date inconnue';
     return date.toLocaleDateString('fr-CA', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric'
+      year: 'numeric',
     });
   };
 
-  if (loading) {
+  const handleLoadMore = async () => {
+    if (!hasMore || loadingMore) return;
+    await fetchImages(selectedTournamentId, true, lastVisible);
+  };
+
+  const selectedTournament = tournaments.find((t) => t.id === selectedTournamentId);
+
+  if (loading && images.length === 0) {
     return (
-      <div className="min-h-[400px] flex items-center justify-center">
-        <div className="relative">
-          <div className="w-16 h-16 border-4 border-rose-100 border-t-rose-500 rounded-full animate-spin"></div>
-          <p className="mt-4 text-gray-600">Chargement des souvenirs du tournoi...</p>
+      <div className="min-h-[320px] flex items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto h-14 w-14 rounded-full border-4 border-white/10 border-t-rose-400 animate-spin" />
+          <p className="mt-4 text-white/60">Chargement de la galerie...</p>
         </div>
       </div>
     );
@@ -196,242 +265,221 @@ export const TournamentGallery = () => {
 
   if (error) {
     return (
-      <div className="text-center py-12">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-rose-100 text-rose-500 mb-4">
-          <span className="text-2xl">!</span>
+      <section className="py-16">
+        <div className="container mx-auto px-4 text-center">
+          <h3 className="text-xl font-semibold text-white">Impossible de charger la galerie</h3>
+          <p className="mt-2 text-white/60">{error}</p>
+          <button
+            onClick={() => fetchImages(selectedTournamentId, false, null)}
+            className="mt-4 rounded-xl bg-linear-to-r from-rose-500 to-orange-500 px-4 py-2 text-white hover:from-rose-600 hover:to-orange-600"
+          >
+            Réessayer
+          </button>
         </div>
-        <h3 className="text-lg font-semibold text-gray-800 mb-2">Impossible de charger la galerie</h3>
-        <p className="text-gray-600 mb-4">{error}</p>
-        <button
-          onClick={() => window.location.reload()}
-          className="px-4 py-2 bg-rose-500 text-white rounded-lg hover:bg-rose-600 transition-colors"
-        >
-          Réessayer
-        </button>
-      </div>
+      </section>
     );
   }
 
   return (
-    <section id="galerie" className="py-16 bg-gradient-to-b from-white to-gray-50">
+    <section id="galerie" className="py-20">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <div className="text-center mb-12">
-          <span className="inline-block px-3 py-1 bg-gradient-to-r from-rose-50 to-orange-50 text-rose-700 rounded-full text-sm font-medium mb-3 border border-rose-200">
-            Shervy 1 - Tournoi
+        <div className="mb-10 text-center">
+          <span className="inline-block rounded-full border border-white/10 bg-white/5 px-3 py-1 text-sm font-medium text-rose-200">
+            Galerie des tournois
           </span>
-          <h2 className="text-4xl font-bold text-gray-900 mb-4">
-            Moments de <span className="bg-gradient-to-r from-rose-600 to-orange-500 bg-clip-text text-transparent">Championnat</span>
+          <h2 className="mt-4 text-4xl font-bold text-white">
+            Moments de{' '}
+            <span className="bg-linear-to-r from-rose-300 to-orange-300 bg-clip-text text-transparent">
+              SherVy
+            </span>
           </h2>
-          <p className="text-lg text-gray-600 max-w-2xl mx-auto">
-            Revivez les moments les plus excitants de notre tournoi inaugural
+          <p className="mx-auto mt-3 max-w-2xl text-lg text-white/65">
+            Affiche seulement les meilleurs moments au départ, puis laisse les visiteurs explorer par tournoi.
           </p>
         </div>
 
+        {/* Tournament filters */}
+        <div className="mb-6 flex flex-wrap gap-2">
+          <button
+            onClick={() => setSelectedTournamentId('all')}
+            className={`rounded-full px-4 py-2 text-sm font-medium transition ${selectedTournamentId === 'all'
+                ? 'bg-white text-rose-600'
+                : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/10'
+              }`}
+          >
+            Tous les tournois
+          </button>
+
+          {tournaments.map((tournament) => (
+            <button
+              key={tournament.id}
+              onClick={() => setSelectedTournamentId(tournament.id)}
+              className={`rounded-full px-4 py-2 text-sm font-medium transition ${selectedTournamentId === tournament.id
+                  ? 'bg-white text-rose-600'
+                  : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/10'
+                }`}
+            >
+              {tournament.name}
+            </button>
+          ))}
+        </div>
+
         {/* Controls */}
-        <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-8 p-6 bg-white rounded-lg shadow-sm border border-gray-200">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-gray-700 font-medium">Filtrer :</span>
+        <div className="mb-8 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-white">
+                {selectedTournamentId === 'all'
+                  ? 'Toutes les photos'
+                  : selectedTournament?.name || 'Tournoi'}
+              </h3>
+              <p className="mt-1 text-sm text-white/60">
+                {featuredOnly
+                  ? 'Mode homepage: photos mises en avant seulement.'
+                  : 'Galerie paginée par tournoi.'}
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <div className="flex flex-wrap gap-2">
-                {getUniqueTags().map(tag => (
+                {getUniqueTags().map((tag) => (
                   <button
                     key={tag}
-                    onClick={() => setFilter(tag)}
-                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all whitespace-nowrap ${filter === tag
-                        ? 'bg-gradient-to-r from-rose-600 to-orange-500 text-white shadow'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    onClick={() => setFilterTag(tag)}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${filterTag === tag
+                        ? 'bg-white text-rose-600'
+                        : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/10'
                       }`}
                   >
-                    {tag === 'tous' ? 'Toutes les photos' : tag.charAt(0).toUpperCase() + tag.slice(1)}
+                    {tag === 'tous' ? 'Toutes les photos' : tag}
                   </button>
                 ))}
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-gray-700 font-medium">Trier :</span>
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as 'recent' | 'ancien')}
-                className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-md text-sm font-medium focus:outline-none focus:ring-2 focus:ring-rose-500 focus:border-transparent"
+                className="rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white/80 focus:outline-none focus:ring-2 focus:ring-rose-400"
               >
-                <option value="recent">Plus récent d'abord</option>
-                <option value="ancien">Plus ancien d'abord</option>
+                <option value="recent" className="text-black">Plus récent d'abord</option>
+                <option value="ancien" className="text-black">Plus ancien d'abord</option>
               </select>
-            </div>
-          </div>
 
-          <div className="flex items-center gap-2">
-            <div className="flex bg-gray-100 p-1 rounded-md">
-              <button
-                onClick={() => setViewMode('grid')}
-                className={`p-2 rounded-md transition-all ${viewMode === 'grid'
-                    ? 'bg-white text-rose-600 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                aria-label="Vue grille"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <rect x="3" y="3" width="7" height="7" rx="1" />
-                  <rect x="14" y="3" width="7" height="7" rx="1" />
-                  <rect x="3" y="14" width="7" height="7" rx="1" />
-                  <rect x="14" y="14" width="7" height="7" rx="1" />
-                </svg>
-              </button>
-              <button
-                onClick={() => setViewMode('masonry')}
-                className={`p-2 rounded-md transition-all ${viewMode === 'masonry'
-                    ? 'bg-white text-rose-600 shadow-sm'
-                    : 'text-gray-500 hover:text-gray-700'
-                  }`}
-                aria-label="Vue mosaïque"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <rect x="3" y="3" width="18" height="7" rx="1" />
-                  <rect x="3" y="14" width="7" height="7" rx="1" />
-                  <rect x="14" y="14" width="7" height="7" rx="1" />
-                </svg>
-              </button>
+              <div className="flex rounded-md border border-white/10 bg-white/5 p-1">
+                <button
+                  onClick={() => setViewMode('grid')}
+                  className={`rounded-md px-3 py-2 text-sm transition ${viewMode === 'grid'
+                      ? 'bg-white text-rose-600 shadow-sm'
+                      : 'text-white/60 hover:text-white'
+                    }`}
+                >
+                  Grille
+                </button>
+                <button
+                  onClick={() => setViewMode('masonry')}
+                  className={`rounded-md px-3 py-2 text-sm transition ${viewMode === 'masonry'
+                      ? 'bg-white text-rose-600 shadow-sm'
+                      : 'text-white/60 hover:text-white'
+                    }`}
+                >
+                  Mosaïque
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Gallery Grid */}
-        <div className={`${viewMode === 'grid'
-            ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6'
-            : 'columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-6 space-y-6'
-          }`}>
+        {/* Grid */}
+        <div
+          className={
+            viewMode === 'grid'
+              ? 'grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'
+              : 'columns-1 sm:columns-2 lg:columns-3 xl:columns-4 gap-6 space-y-6'
+          }
+        >
           <AnimatePresence>
             {sortedImages.map((image, index) => (
               <motion.div
                 key={image.id}
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.3, delay: index * 0.05 }}
-                layout
-                className={`relative group cursor-pointer ${viewMode === 'masonry' ? 'break-inside-avoid' : ''
-                  }`}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25, delay: index * 0.03 }}
+                className={`group cursor-pointer ${viewMode === 'masonry' ? 'break-inside-avoid' : ''}`}
                 onClick={() => openLightbox(image)}
               >
-                <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-gray-50 to-gray-100 shadow-md hover:shadow-lg transition-all duration-300 border border-gray-100">
-                  {/* Image Container */}
-                  <div className="aspect-square relative overflow-hidden">
+                <div className="overflow-hidden rounded-xl border border-white/10 bg-white/5 backdrop-blur-md transition hover:-translate-y-1 hover:shadow-[0_10px_30px_-10px_rgba(244,63,94,0.30)]">
+                  <div className="aspect-square overflow-hidden bg-white/5">
                     <img
-                      src={image.url}
+                      src={image.thumbnailUrl || image.url}
                       alt={image.title}
-                      className="w-full h-full object-cover transform group-hover:scale-105 transition-transform duration-500"
                       loading="lazy"
+                      className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                     />
-                    {/* Overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <div className="absolute bottom-0 left-0 right-0 p-5 translate-y-6 group-hover:translate-y-0 transition-transform duration-300">
-                        <h3 className="text-lg font-bold text-white mb-2 line-clamp-2">
-                          {image.title}
-                        </h3>
-                        {image.description && (
-                          <p className="text-gray-200 text-sm line-clamp-2 mb-3">
-                            {image.description}
-                          </p>
-                        )}
-                        <div className="flex items-center justify-between">
-                          {image.date && (
-                            <span className="text-xs text-rose-100 bg-rose-600/30 backdrop-blur-sm px-2 py-1 rounded-full">
-                              {formatDate(image.date)}
-                            </span>
-                          )}
-                          <span className="text-xs text-white/90 bg-black/40 px-3 py-1 rounded-md">
-                            Voir les détails
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    {/* Preview Info */}
-                    <div className="absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-black/50 to-transparent">
-                      <h3 className="text-sm font-semibold text-white line-clamp-1">
-                        {image.title}
-                      </h3>
-                    </div>
                   </div>
-                  {/* Tags */}
-                  {image.tags && image.tags.length > 0 && (
-                    <div className="absolute top-3 left-3 flex flex-wrap gap-1">
-                      {image.tags.slice(0, 2).map(tag => (
+
+                  <div className="p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <h4 className="line-clamp-1 font-semibold text-white">
+                        {image.title}
+                      </h4>
+                      {image.date && (
+                        <span className="shrink-0 text-xs text-white/40">
+                          {formatDate(image.date)}
+                        </span>
+                      )}
+                    </div>
+
+                    {image.description && (
+                      <p className="mt-2 line-clamp-2 text-sm text-white/65">
+                        {image.description}
+                      </p>
+                    )}
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {image.tags?.slice(0, 3).map((tag) => (
                         <span
                           key={tag}
-                          className="px-2 py-1 bg-black/80 text-white text-xs rounded-md shadow"
+                          className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-xs font-medium text-rose-200"
                         >
                           {tag}
                         </span>
                       ))}
-                      {image.tags.length > 2 && (
-                        <span className="px-2 py-1 bg-black/80 text-white text-xs rounded-md">
-                          +{image.tags.length - 2}
-                        </span>
-                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
               </motion.div>
             ))}
           </AnimatePresence>
         </div>
 
-        {/* Empty State */}
+        {/* Empty state */}
         {sortedImages.length === 0 && (
-          <div className="text-center py-16">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-r from-rose-50 to-orange-50 text-rose-500 mb-6">
-              <svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <h3 className="text-xl font-semibold text-gray-800 mb-2">Aucune image trouvée</h3>
-            <p className="text-gray-600">Essayez un filtre différent ou revenez plus tard.</p>
+          <div className="py-16 text-center">
+            <h3 className="text-xl font-semibold text-white">Aucune image trouvée</h3>
+            <p className="mt-2 text-white/60">Essayez un autre tournoi ou un autre filtre.</p>
           </div>
         )}
 
-        {/* Stats */}
-        {images.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4 }}
-            className="mt-12 pt-8 border-t border-gray-200"
-          >
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-center">
-              <div className="p-4 bg-gradient-to-br from-rose-50 to-rose-100 rounded-lg border border-rose-100">
-                <div className="text-2xl font-bold text-rose-600 mb-1">{images.length}</div>
-                <div className="text-sm text-gray-600 font-medium">Photos totales</div>
-              </div>
-              <div className="p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg border border-orange-100">
-                <div className="text-2xl font-bold text-orange-600 mb-1">
-                  {new Set(images.flatMap(img => img.tags || [])).size}
-                </div>
-                <div className="text-sm text-gray-600 font-medium">Catégories</div>
-              </div>
-              <div className="p-4 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg border border-amber-100">
-                <div className="text-2xl font-bold text-amber-600 mb-1">
-                  {images.reduce((acc, img) => acc + (img.tags?.length || 0), 0)}
-                </div>
-                <div className="text-sm text-gray-600 font-medium">Étiquettes totales</div>
-              </div>
-              {/* <div className="p-4 bg-gradient-to-br from-red-50 to-red-100 rounded-lg border border-red-100">
-                <div className="text-2xl font-bold text-red-600 mb-1">
-                  {images[0]?.date ? formatDate(images[0].date) : 'S/O'}
-                </div>
-                <div className="text-sm text-gray-600 font-medium">Dernière mise à jour</div>
-              </div> */}
-            </div>
-          </motion.div>
+        {/* Load more */}
+        {hasMore && !featuredOnly && (
+          <div className="mt-10 text-center">
+            <button
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              className="rounded-xl bg-linear-to-r from-rose-500 to-orange-500 px-6 py-3 font-medium text-white hover:from-rose-600 hover:to-orange-600 disabled:opacity-60"
+            >
+              {loadingMore ? 'Chargement...' : 'Voir plus de photos'}
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Enhanced Lightbox Modal */}
+      {/* Lightbox */}
       <AnimatePresence>
         {selectedImage && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -439,98 +487,84 @@ export const TournamentGallery = () => {
               onClick={closeLightbox}
               className="fixed inset-0 z-50 bg-black/90"
             />
-            {/* Modal */}
+
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <motion.div
-                initial={{ scale: 0.95, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                exit={{ scale: 0.95, opacity: 0 }}
+                initial={{ opacity: 0, scale: 0.97 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.97 }}
                 className="relative w-full max-w-6xl"
                 onClick={(e) => e.stopPropagation()}
               >
-                {/* Close Button */}
                 <button
                   onClick={closeLightbox}
-                  className="absolute -top-14 right-0 text-white hover:text-rose-300 transition-colors z-10"
-                  aria-label="Fermer la visionneuse"
+                  className="absolute -top-14 right-0 z-10 text-white hover:text-rose-300"
                 >
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm">Fermer</span>
-                    <div className="p-2 bg-white/10 backdrop-blur-sm rounded-full">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </div>
-                  </div>
+                  Fermer
                 </button>
-                <div className="bg-white rounded-xl overflow-hidden shadow-2xl">
+
+                <div className="overflow-hidden rounded-xl bg-white/95 backdrop-blur-xl shadow-2xl">
                   <div className="grid lg:grid-cols-3">
-                    {/* Image Section */}
-                    <div className="lg:col-span-2">
-                      <div className="relative h-[60vh] lg:h-[70vh] bg-gradient-to-br from-gray-50 to-gray-100">
+                    <div className="relative lg:col-span-2 bg-black/5">
+                      <div className="h-[60vh] lg:h-[72vh]">
                         <img
                           src={selectedImage.url}
                           alt={selectedImage.title}
-                          className="w-full h-full object-contain p-4"
+                          className="h-full w-full object-contain p-4"
                         />
-                        {/* Navigation Buttons */}
-                        <button
-                          onClick={goToPrevious}
-                          className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/90 backdrop-blur-sm rounded-full hover:bg-white shadow-lg transition-all"
-                          aria-label="Image précédente"
-                        >
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={goToNext}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/90 backdrop-blur-sm rounded-full hover:bg-white shadow-lg transition-all"
-                          aria-label="Image suivante"
-                        >
-                          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </button>
-                        {/* Image Counter */}
-                        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/80 text-white px-4 py-2 rounded-md text-sm">
-                          {sortedImages.findIndex(img => img.id === selectedImage.id) + 1} / {sortedImages.length}
-                        </div>
                       </div>
+
+                      <button
+                        onClick={goToPrevious}
+                        className="absolute left-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-3 shadow"
+                      >
+                        ←
+                      </button>
+
+                      <button
+                        onClick={goToNext}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 rounded-full bg-white/90 p-3 shadow"
+                      >
+                        →
+                      </button>
                     </div>
-                    {/* Info Panel */}
+
                     <div className="p-6 lg:p-8">
-                      <div className="mb-6">
-                        <div className="flex items-center gap-2 mb-3">
-                          <div className="w-2 h-2 bg-gradient-to-r from-rose-600 to-orange-500 rounded-full"></div>
-                          <span className="text-sm text-gray-500 font-medium">Photo du tournoi</span>
-                        </div>
-                        <h3 className="text-2xl lg:text-3xl font-bold text-gray-900 mb-3">
-                          {selectedImage.title}
-                        </h3>
-                        {selectedImage.date && (
-                          <div className="flex items-center gap-2 text-gray-500 text-sm">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                            </svg>
-                            <span>{formatDate(selectedImage.date)}</span>
-                          </div>
-                        )}
-                      </div>
+                      <p className="text-sm font-medium text-rose-600">
+                        {selectedImage.tournamentName || 'Tournoi'}
+                      </p>
+
+                      <h3 className="mt-2 text-2xl font-bold text-gray-900">
+                        {selectedImage.title}
+                      </h3>
+
+                      {selectedImage.date && (
+                        <p className="mt-2 text-sm text-gray-500">
+                          {formatDate(selectedImage.date)}
+                        </p>
+                      )}
+
                       {selectedImage.description && (
-                        <div className="mb-6 p-4 bg-gradient-to-r from-rose-50 to-orange-50 rounded-lg">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-2">Description</h4>
-                          <p className="text-gray-700">{selectedImage.description}</p>
+                        <div className="mt-6 rounded-lg bg-rose-50 p-4">
+                          <h4 className="mb-2 text-sm font-semibold text-gray-700">
+                            Description
+                          </h4>
+                          <p className="text-sm text-gray-700">
+                            {selectedImage.description}
+                          </p>
                         </div>
                       )}
+
                       {selectedImage.tags && selectedImage.tags.length > 0 && (
-                        <div className="mb-8">
-                          <h4 className="text-sm font-semibold text-gray-700 mb-3">Étiquettes</h4>
+                        <div className="mt-6">
+                          <h4 className="mb-3 text-sm font-semibold text-gray-700">
+                            Étiquettes
+                          </h4>
                           <div className="flex flex-wrap gap-2">
-                            {selectedImage.tags.map(tag => (
+                            {selectedImage.tags.map((tag) => (
                               <span
                                 key={tag}
-                                className="px-3 py-1.5 bg-gradient-to-r from-rose-100 to-orange-100 text-rose-700 text-sm rounded-md font-medium"
+                                className="rounded-full bg-orange-50 px-3 py-1 text-sm font-medium text-orange-700"
                               >
                                 {tag}
                               </span>
@@ -538,35 +572,6 @@ export const TournamentGallery = () => {
                           </div>
                         </div>
                       )}
-                      {/* Lightbox Actions */}
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-center gap-4">
-                          <button
-                            onClick={goToPrevious}
-                            className="p-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                            aria-label="Image précédente"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={goToNext}
-                            className="p-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-                            aria-label="Image suivante"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                            </svg>
-                          </button>
-                        </div>
-                        <div className="pt-4 border-t border-gray-200">
-                          <p className="text-xs text-gray-500 text-center">
-                            Appuyez sur <kbd className="px-2 py-1 bg-gray-100 rounded text-xs">Échap</kbd> pour fermer •
-                            Utilisez <kbd className="px-2 py-1 bg-gray-100 rounded text-xs mx-1">←</kbd> <kbd className="px-2 py-1 bg-gray-100 rounded text-xs">→</kbd> pour naviguer
-                          </p>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>

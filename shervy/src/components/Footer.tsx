@@ -75,9 +75,9 @@ export const Footer = () => {
                                 <p className="text-rose-100">Sherbrooke, Québec</p>
                             </div>
                             <div className="flex items-center space-x-3">
-                                <div className="w-8 h-8 bg-rose-500/20 rounded-lg flex items-center justify-center">
+                                {/* <div className="w-8 h-8 bg-rose-500/20 rounded-lg flex items-center justify-center">
                                     📞
-                                </div>
+                                </div> */}
                                 {/* <p className="text-rose-100">+1 (819) 555-1234</p> */}
                             </div>
                             <div className="flex items-center space-x-3">
